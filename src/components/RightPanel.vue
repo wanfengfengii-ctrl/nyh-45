@@ -9,6 +9,7 @@ import { ValidationSeverity, ToolType, ProjectStatus, HistoryActionType } from '
 import type { ValidationIssue } from '@/types'
 import { useHistoryStore } from '@/stores/history'
 import StatisticsPanel from './StatisticsPanel.vue'
+import SectionPanel from './SectionPanel.vue'
 
 const workspaceStore = useWorkspaceStore()
 const soundingStore = useSoundingStore()
@@ -212,6 +213,13 @@ const sortedContours = computed(() =>
         @click="workspaceStore.setRightPanelTab('projects')"
       >
         项目
+      </button>
+      <button
+        class="tab-btn"
+        :class="{ active: workspaceStore.rightPanelTab === 'section' }"
+        @click="workspaceStore.setRightPanelTab('section')"
+      >
+        断面分析
       </button>
     </div>
 
@@ -521,6 +529,10 @@ const sortedContours = computed(() =>
             <div class="wf-label">已完成</div>
           </div>
         </div>
+      </div>
+
+      <div v-if="workspaceStore.rightPanelTab === 'section'" class="section-panel-wrapper">
+        <SectionPanel />
       </div>
     </div>
   </div>
@@ -1046,5 +1058,10 @@ const sortedContours = computed(() =>
 }
 .wf-line.done {
   background: #4caf50;
+}
+
+.section-panel-wrapper {
+  height: 100%;
+  min-height: 0;
 }
 </style>

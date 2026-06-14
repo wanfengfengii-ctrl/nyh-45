@@ -85,7 +85,8 @@ const currentToolLabel = computed(() => {
     edit_point: '编辑测深点',
     draw_contour: '绘制等深线',
     move_node: '编辑节点',
-    delete: '删除模式'
+    delete: '删除模式',
+    draw_section: '断面分析'
   }
   return map[workspaceStore.currentTool] || '选择模式'
 })
@@ -569,6 +570,10 @@ function handleKeydown(e: KeyboardEvent) {
     case '5':
       workspaceStore.setTool(ToolType.DELETE)
       break
+    case '6':
+      workspaceStore.setTool(ToolType.DRAW_SECTION)
+      workspaceStore.setRightPanelTab('section')
+      break
   }
 }
 
@@ -771,7 +776,7 @@ watch(
 
           <footer class="app-footer">
             <div class="footer-left">
-              <span class="shortcut-hint">快捷键: 1-添加测深点 | 2-编辑测深点 | 3-绘制等深线 | 4-编辑节点 | 5-删除 | Ctrl+Z撤销 | Ctrl+Y重做 | Ctrl+S保存 | Esc-取消 | Enter-完成</span>
+              <span class="shortcut-hint">快捷键: 1-添加测深点 | 2-编辑测深点 | 3-绘制等深线 | 4-编辑节点 | 5-删除 | 6-断面分析 | Ctrl+Z撤销 | Ctrl+Y重做 | Ctrl+S保存 | Esc-取消 | Enter-完成</span>
             </div>
             <div class="footer-right">
               <span>缩放: {{ workspaceStore.mapZoom.toFixed(1) }}</span>

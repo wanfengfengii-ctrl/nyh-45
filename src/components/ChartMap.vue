@@ -9,6 +9,7 @@ import { useSoundingStore } from '@/stores/sounding'
 import { useContourStore } from '@/stores/contour'
 import { useValidationStore } from '@/stores/validation'
 import { useHistoryStore } from '@/stores/history'
+import { useSectionStore } from '@/stores/section'
 import { isPointNear, distance } from '@/utils/geometry'
 
 const emit = defineEmits<{
@@ -24,17 +25,24 @@ const tempDrawingLayer = shallowRef<L.Polyline | null>(null)
 const tempMarkers = shallowRef<L.Marker[]>([])
 const editingNodeMarkers = shallowRef<Map<string, L.Marker>>(new Map())
 const validationMarkers = shallowRef<Map<string, L.Marker>>(new Map())
+const sectionLayers = shallowRef<Map<string, L.LayerGroup>>(new Map())
+const tempSectionLayer = shallowRef<L.Polyline | null>(null)
+const tempSectionMarkers = shallowRef<L.Marker[]>([])
+const sectionPointMarkers = shallowRef<Map<string, L.Marker>>(new Map())
+const sectionCrossingMarkers = shallowRef<Map<string, L.Marker>>(new Map())
 
 const workspaceStore = useWorkspaceStore()
 const soundingStore = useSoundingStore()
 const contourStore = useContourStore()
 const validationStore = useValidationStore()
 const historyStore = useHistoryStore()
+const sectionStore = useSectionStore()
 
 const cursorStyle = computed(() => {
   switch (workspaceStore.currentTool) {
     case ToolType.ADD_SOUNDING:
     case ToolType.DRAW_CONTOUR:
+    case ToolType.DRAW_SECTION:
       return 'crosshair'
     case ToolType.DELETE:
       return 'not-allowed'
@@ -80,6 +88,7 @@ function initMap() {
   })
   renderAllSoundings()
   renderAllContours()
+  renderAllSections()
   renderValidationIssues()
 }
 
@@ -105,6 +114,9 @@ function handleMapClick(e: L.LeafletMouseEvent) {
       break
     case ToolType.DRAW_CONTOUR:
       handleDrawContour(pos)
+      break
+    case ToolType.DRAW_SECTION:
+      handleDrawSection(pos)
       break
     case ToolType.DELETE:
       handleDeleteAt(pos)
@@ -132,6 +144,270 @@ function handleDrawContour(pos: LatLng) {
   contourStore.addDrawingPoint(pos)
   updateTempDrawing()
   addTempMarker(pos)
+}
+
+function handleDrawSection(pos: LatLng) {
+  if (!sectionStore.isDrawing) {
+    sectionStore.startDrawing()
+  }
+  sectionStore.addDrawingPoint(pos)
+  updateTempSectionDrawing()
+  addTempSectionMarker(pos)
+}
+
+function updateTempSectionDrawing() {
+  if (!map.value) return
+  if (tempSectionLayer.value) {
+    map.value.removeLayer(tempSectionLayer.value)
+  }
+  if (sectionStore.drawingPoints.length > 0) {
+    const latlngs = sectionStore.drawingPoints.map(
+      (p) => [p.lat, p.lng] as [number, number]
+    )
+    tempSectionLayer.value = L.polyline(latlngs, {
+      color: '#e91e63',
+      weight: 3,
+      opacity: 0.9,
+      dashArray: '10, 5'
+    })
+    tempSectionLayer.value.addTo(map.value)
+  }
+}
+
+function addTempSectionMarker(pos: LatLng) {
+  if (!map.value) return
+  const marker = L.marker([pos.lat, pos.lng], {
+    icon: L.divIcon({
+      className: 'temp-section-marker',
+      html: `<div style="
+        background: #e91e63;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        border: 2px solid white;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+      "></div>`,
+      iconSize: [12, 12],
+      iconAnchor: [6, 6]
+    }),
+    interactive: false
+  })
+  marker.addTo(map.value)
+  tempSectionMarkers.value.push(marker)
+}
+
+function clearTempSectionDrawing() {
+  if (map.value && tempSectionLayer.value) {
+    map.value.removeLayer(tempSectionLayer.value)
+    tempSectionLayer.value = null
+  }
+  tempSectionMarkers.value.forEach((m) => map.value?.removeLayer(m))
+  tempSectionMarkers.value = []
+}
+
+function finishSectionDrawing() {
+  const section = sectionStore.finishDrawing()
+  clearTempSectionDrawing()
+  if (section) {
+    renderAllSections()
+  }
+}
+
+function cancelSectionDrawing() {
+  sectionStore.cancelDrawing()
+  clearTempSectionDrawing()
+}
+
+function renderSection(section: ReturnType<typeof useSectionStore>['sections'][0]) {
+  if (!map.value) return
+  const group = L.layerGroup()
+  const isSelected = sectionStore.selectedSectionId === section.id
+  const latlngs = section.points.map((p) => [p.lat, p.lng] as [number, number])
+
+  const polyline = L.polyline(latlngs, {
+    color: section.color,
+    weight: isSelected ? 5 : 3,
+    opacity: 0.9
+  })
+
+  polyline.on('click', (e) => {
+    L.DomEvent.stopPropagation(e)
+    if (workspaceStore.currentTool === ToolType.DELETE) {
+      sectionStore.deleteSection(section.id)
+      renderAllSections()
+      return
+    }
+    sectionStore.selectSection(section.id)
+    renderAllSections()
+  })
+
+  polyline.addTo(group)
+
+  const startMarker = L.marker([section.points[0].lat, section.points[0].lng], {
+    icon: L.divIcon({
+      className: 'section-start-marker',
+      html: `<div style="
+        background: ${section.color};
+        color: white;
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 10px;
+        font-weight: bold;
+        border: 2px solid white;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+        font-family: sans-serif;
+      ">S</div>`,
+      iconSize: [24, 24],
+      iconAnchor: [12, 12]
+    }),
+    interactive: false
+  })
+  startMarker.addTo(group)
+
+  const endIdx = section.points.length - 1
+  const endMarker = L.marker([section.points[endIdx].lat, section.points[endIdx].lng], {
+    icon: L.divIcon({
+      className: 'section-end-marker',
+      html: `<div style="
+        background: ${section.color};
+        color: white;
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 10px;
+        font-weight: bold;
+        border: 2px solid white;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+        font-family: sans-serif;
+      ">E</div>`,
+      iconSize: [24, 24],
+      iconAnchor: [12, 12]
+    }),
+    interactive: false
+  })
+  endMarker.addTo(group)
+
+  const midPoint = section.points[Math.floor(section.points.length / 2)]
+  const labelMarker = L.marker([midPoint.lat, midPoint.lng], {
+    icon: L.divIcon({
+      className: 'section-label',
+      html: `<div style="
+        background: rgba(255,255,255,0.95);
+        color: ${section.color};
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 11px;
+        font-weight: bold;
+        border: 1px solid ${section.color};
+        white-space: nowrap;
+        font-family: sans-serif;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+      ">${section.name}</div>`,
+      iconSize: [80, 20],
+      iconAnchor: [40, -8]
+    }),
+    interactive: false
+  })
+  labelMarker.addTo(group)
+
+  group.addTo(map.value)
+  sectionLayers.value.set(section.id, group)
+}
+
+function renderAllSections() {
+  if (!map.value) return
+  sectionLayers.value.forEach((g) => map.value?.removeLayer(g))
+  sectionLayers.value.clear()
+  sectionPointMarkers.value.forEach((m) => map.value?.removeLayer(m))
+  sectionPointMarkers.value.clear()
+  sectionCrossingMarkers.value.forEach((m) => map.value?.removeLayer(m))
+  sectionCrossingMarkers.value.clear()
+  sectionStore.sections.forEach(renderSection)
+  if (sectionStore.selectedSectionId) {
+    renderSectionAnalysisPoints()
+    renderSectionCrossings()
+  }
+}
+
+function renderSectionAnalysisPoints() {
+  if (!map.value || !sectionStore.analysisResult) return
+  const result = sectionStore.analysisResult
+  result.soundingPoints.forEach((sp, idx) => {
+    const marker = L.marker([sp.projectedPosition.lat, sp.projectedPosition.lng], {
+      icon: L.divIcon({
+        className: 'section-point-marker',
+        html: `<div style="
+          background: #ff9800;
+          color: white;
+          width: 16px;
+          height: 16px;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 9px;
+          font-weight: bold;
+          border: 2px solid white;
+          box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+          font-family: sans-serif;
+        ">●</div>`,
+        iconSize: [16, 16],
+        iconAnchor: [8, 8]
+      }),
+      interactive: true
+    })
+    marker.bindTooltip(`${sp.point.depth.toFixed(1)}m`, {
+      permanent: false,
+      direction: 'top'
+    })
+    marker.addTo(map.value!)
+    sectionPointMarkers.value.set(`sp-${idx}`, marker)
+  })
+}
+
+function renderSectionCrossings() {
+  if (!map.value || !sectionStore.analysisResult) return
+  const result = sectionStore.analysisResult
+  result.contourCrossings.forEach((cc, idx) => {
+    const color = cc.direction === 'ascending' ? '#4caf50' : '#f44336'
+    const marker = L.marker([cc.position.lat, cc.position.lng], {
+      icon: L.divIcon({
+        className: 'section-crossing-marker',
+        html: `<div style="
+          background: ${color};
+          color: white;
+          width: 20px;
+          height: 20px;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 10px;
+          font-weight: bold;
+          border: 2px solid white;
+          box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+          font-family: sans-serif;
+          transform: rotate(45deg);
+        ">${cc.direction === 'ascending' ? '↑' : '↓'}</div>`,
+        iconSize: [20, 20],
+        iconAnchor: [10, 10]
+      }),
+      interactive: true
+    })
+    marker.bindTooltip(`${cc.contourDepth}m ${cc.direction === 'ascending' ? '变深' : '变浅'}`, {
+      permanent: false,
+      direction: 'top'
+    })
+    marker.addTo(map.value!)
+    sectionCrossingMarkers.value.set(`cc-${idx}`, marker)
+  })
 }
 
 function handleDeleteAt(pos: LatLng) {
@@ -669,7 +945,9 @@ function cancelDrawing() {
 
 defineExpose({
   finishDrawing,
-  cancelDrawing
+  cancelDrawing,
+  finishSectionDrawing,
+  cancelSectionDrawing
 })
 
 watch(
@@ -678,11 +956,15 @@ watch(
     if (workspaceStore.currentTool !== ToolType.DRAW_CONTOUR && contourStore.isDrawing) {
       cancelDrawing()
     }
+    if (workspaceStore.currentTool !== ToolType.DRAW_SECTION && sectionStore.isDrawing) {
+      cancelSectionDrawing()
+    }
     if (workspaceStore.currentTool !== ToolType.MOVE_NODE) {
       contourStore.stopEditingNodes()
       renderAllContours()
     }
     renderAllSoundings()
+    renderAllSections()
   }
 )
 
@@ -735,6 +1017,26 @@ watch(
   }
 )
 
+watch(
+  () => [
+    sectionStore.sections.length,
+    sectionStore.selectedSectionId,
+    sectionStore.analysisResult?.soundingPoints.length,
+    sectionStore.analysisResult?.contourCrossings.length
+  ],
+  () => {
+    nextTick(() => renderAllSections())
+  },
+  { deep: true }
+)
+
+watch(
+  () => sectionStore.drawingPoints.length,
+  () => {
+    updateTempSectionDrawing()
+  }
+)
+
 onMounted(() => {
   initMap()
 })
@@ -755,6 +1057,11 @@ onBeforeUnmount(() => {
       <button class="btn-primary" @click="finishDrawing(false)">完成</button>
       <button class="btn-success" @click="finishDrawing(true)">闭合</button>
       <button class="btn-danger" @click="cancelDrawing">取消</button>
+    </div>
+    <div v-if="sectionStore.isDrawing" class="drawing-controls">
+      <span class="drawing-tip">断面绘制 - 已添加 {{ sectionStore.drawingPoints.length }} 个节点</span>
+      <button class="btn-primary" @click="finishSectionDrawing">完成</button>
+      <button class="btn-danger" @click="cancelSectionDrawing">取消</button>
     </div>
     <div v-if="contourStore.editingLineId" class="drawing-controls">
       <span class="drawing-tip">节点编辑模式 - 拖动节点移动 / 双击添加 / 右键删除</span>
@@ -867,7 +1174,13 @@ onBeforeUnmount(() => {
 .contour-label-halo,
 .edit-node,
 .validation-marker,
-.temp-marker {
+.temp-marker,
+.temp-section-marker,
+.section-start-marker,
+.section-end-marker,
+.section-label,
+.section-point-marker,
+.section-crossing-marker {
   background: none !important;
   border: none !important;
 }

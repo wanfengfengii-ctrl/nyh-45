@@ -66,7 +66,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const currentTool = ref<ToolType>(ToolType.NONE)
   const leftPanelCollapsed = ref(false)
   const rightPanelCollapsed = ref(false)
-  const rightPanelTab = ref<'properties' | 'statistics' | 'validation' | 'projects'>('properties')
+  const rightPanelTab = ref<'properties' | 'statistics' | 'validation' | 'projects' | 'section'>('properties')
   const showDepthLabels = ref(true)
   const showSoundingPoints = ref(true)
   const showContourLines = ref(true)
@@ -109,7 +109,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     rightPanelCollapsed.value = !rightPanelCollapsed.value
   }
 
-  function setRightPanelTab(tab: 'properties' | 'statistics' | 'validation' | 'projects') {
+  function setRightPanelTab(tab: 'properties' | 'statistics' | 'validation' | 'projects' | 'section') {
     rightPanelTab.value = tab
   }
 

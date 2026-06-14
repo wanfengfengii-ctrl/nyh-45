@@ -32,7 +32,8 @@ const tools = [
   { type: ToolType.EDIT_POINT, label: '编辑测深点', icon: '🔧' },
   { type: ToolType.DRAW_CONTOUR, label: '绘制等深线', icon: '〰️' },
   { type: ToolType.MOVE_NODE, label: '编辑节点', icon: '✏️' },
-  { type: ToolType.DELETE, label: '删除', icon: '🗑️' }
+  { type: ToolType.DELETE, label: '删除', icon: '🗑️' },
+  { type: ToolType.DRAW_SECTION, label: '断面分析', icon: '📊' }
 ]
 
 function selectTool(type: ToolType) {

@@ -33,7 +33,8 @@ export enum ToolType {
   DRAW_CONTOUR = 'draw_contour',
   EDIT_POINT = 'edit_point',
   MOVE_NODE = 'move_node',
-  DELETE = 'delete'
+  DELETE = 'delete',
+  DRAW_SECTION = 'draw_section'
 }
 
 export enum ValidationSeverity {
@@ -142,4 +143,69 @@ export interface ExportOptions {
   includeSoundings: boolean
   includeContours: boolean
   includeMetadata: boolean
+}
+
+export interface SectionLine {
+  id: string
+  name: string
+  points: LatLng[]
+  createdAt: number
+  color: string
+}
+
+export interface SectionSoundingPoint {
+  point: SoundingPoint
+  distance: number
+  projectedPosition: LatLng
+}
+
+export interface ContourCrossing {
+  contourId: string
+  contourDepth: number
+  position: LatLng
+  distance: number
+  direction: 'ascending' | 'descending'
+}
+
+export interface SlopeSegment {
+  startDistance: number
+  endDistance: number
+  startDepth: number
+  endDepth: number
+  slope: number
+  slopeAngle: number
+  length: number
+  isAbnormal: boolean
+}
+
+export interface SectionStatistics {
+  totalLength: number
+  minDepth: number
+  maxDepth: number
+  avgDepth: number
+  depthRange: number
+  maxSlope: number
+  maxSlopeAngle: number
+  avgSlope: number
+  soundingCount: number
+  contourCrossingCount: number
+  abnormalSlopeCount: number
+}
+
+export interface SectionAnalysisResult {
+  sectionId: string
+  sectionName: string
+  linePoints: LatLng[]
+  soundingPoints: SectionSoundingPoint[]
+  contourCrossings: ContourCrossing[]
+  slopeSegments: SlopeSegment[]
+  statistics: SectionStatistics
+  generatedAt: number
+}
+
+export interface SectionExportOptions {
+  format: 'png' | 'json'
+  includeProfile: boolean
+  includeStatistics: boolean
+  includeRawData: boolean
 }
