@@ -21,7 +21,7 @@ function updateSoundingDepth(id: string, value: string) {
   if (!isNaN(depth)) {
     soundingStore.updatePoint(id, { depth })
     if (validationStore.autoValidate) {
-      validationStore.runFullValidation()
+      validationStore.validateAfterPointMove(id)
     }
   }
 }

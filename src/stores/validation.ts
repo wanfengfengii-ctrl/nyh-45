@@ -261,24 +261,112 @@ export const useValidationStore = defineStore('validation', () => {
     return result
   }
 
-  function validateAfterDelete(pointId: string) {
+  function validateAfterPointMove(pointId: string) {
+    const soundingStore = useSoundingStore()
     const contourStore = useContourStore()
-    const issues: ValidationIssue[] = []
+    const point = soundingStore.getPointById(pointId)
+    if (!point) return
+    const affectedContourIds: string[] = []
     for (const line of contourStore.lines) {
-      const soundingStore = useSoundingStore()
-      issues.push(...validateContourDepthConsistency(line, soundingStore.points))
+      const dist = pointToLineDistance(point.position, line.points)
+      if (dist < 500) {
+        affectedContourIds.push(line.id)
+      }
     }
-    const filtered = result.value.issues.filter(
-      (i) => !i.relatedIds.includes(pointId)
-    )
+    const allLineIds = new Set<string>(affectedContourIds)
+    for (const cid of affectedContourIds) {
+      const line = contourStore.lines.find((l) => l.id === cid)
+      if (!line) continue
+      for (const other of contourStore.lines) {
+        if (other.id === cid) continue
+        const minDist = getMinDistanceBetweenLines(line, other)
+        if (minDist < 500) {
+          allLineIds.add(other.id)
+        }
+      }
+    }
+    const relatedLineIds = Array.from(allLineIds)
+    const keptIssues = result.value.issues.filter((issue) => {
+      if (
+        issue.type === IssueType.DATA_INCONSISTENCY ||
+        issue.type === IssueType.DEPTH_JUMP ||
+        issue.type === IssueType.CONTOUR_INTERSECTION ||
+        issue.type === IssueType.UNCLOSED_CONTOUR
+      ) {
+        for (const rid of relatedLineIds) {
+          if (issue.relatedIds.includes(rid)) return false
+        }
+      }
+      if (issue.relatedIds.includes(pointId) && issue.type === IssueType.DATA_INCONSISTENCY) {
+        return false
+      }
+      return true
+    })
+    const newIssues: ValidationIssue[] = []
+    const relatedLines = contourStore.lines.filter((l) => relatedLineIds.includes(l.id))
+    newIssues.push(...validateContourIntersections(relatedLines))
+    newIssues.push(...validateClosedContours(relatedLines))
+    for (const line of relatedLines) {
+      newIssues.push(...validateContourDepthJump(line))
+      newIssues.push(...validateContourDepthConsistency(line, soundingStore.points))
+    }
+    const allIssues = deduplicateIssues([...keptIssues, ...newIssues])
     result.value = {
-      issues: [...filtered, ...issues],
-      hasErrors: issues.some((i) => i.severity === Severity.ERROR),
-      hasWarnings: issues.some((i) => i.severity === Severity.WARNING),
+      issues: allIssues,
+      hasErrors: allIssues.some((i) => i.severity === Severity.ERROR),
+      hasWarnings: allIssues.some((i) => i.severity === Severity.WARNING),
       timestamp: Date.now()
     }
-    if (autoValidate.value) {
-      runFullValidation()
+  }
+
+  function validateAfterDelete(pointId: string) {
+    const soundingStore = useSoundingStore()
+    const contourStore = useContourStore()
+    const affectedContourIds = soundingStore.findAffectedContours(pointId)
+    const allLineIds = new Set<string>()
+    for (const cid of affectedContourIds) {
+      allLineIds.add(cid)
+    }
+    for (const cid of affectedContourIds) {
+      const line = contourStore.lines.find((l) => l.id === cid)
+      if (!line) continue
+      for (const other of contourStore.lines) {
+        if (other.id === cid) continue
+        const minDist = getMinDistanceBetweenLines(line, other)
+        if (minDist < 500) {
+          allLineIds.add(other.id)
+        }
+      }
+    }
+    const relatedLineIds = Array.from(allLineIds)
+    const keptIssues = result.value.issues.filter((issue) => {
+      if (issue.relatedIds.includes(pointId)) return false
+      if (
+        issue.type === IssueType.DATA_INCONSISTENCY ||
+        issue.type === IssueType.DEPTH_JUMP ||
+        issue.type === IssueType.CONTOUR_INTERSECTION ||
+        issue.type === IssueType.UNCLOSED_CONTOUR
+      ) {
+        for (const rid of relatedLineIds) {
+          if (issue.relatedIds.includes(rid)) return false
+        }
+      }
+      return true
+    })
+    const newIssues: ValidationIssue[] = []
+    const relatedLines = contourStore.lines.filter((l) => relatedLineIds.includes(l.id))
+    newIssues.push(...validateContourIntersections(relatedLines))
+    newIssues.push(...validateClosedContours(relatedLines))
+    for (const line of relatedLines) {
+      newIssues.push(...validateContourDepthJump(line))
+      newIssues.push(...validateContourDepthConsistency(line, soundingStore.points))
+    }
+    const allIssues = deduplicateIssues([...keptIssues, ...newIssues])
+    result.value = {
+      issues: allIssues,
+      hasErrors: allIssues.some((i) => i.severity === Severity.ERROR),
+      hasWarnings: allIssues.some((i) => i.severity === Severity.WARNING),
+      timestamp: Date.now()
     }
   }
 
@@ -303,6 +391,7 @@ export const useValidationStore = defineStore('validation', () => {
     autoValidate,
     runFullValidation,
     validateAfterDelete,
+    validateAfterPointMove,
     clearIssues,
     setAutoValidate,
     validateAllSoundingPoints,

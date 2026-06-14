@@ -213,7 +213,7 @@ function renderSounding(point: ReturnType<typeof useSoundingStore>['points'][0])
       position: { lat: pos.lat, lng: pos.lng }
     })
     if (validationStore.autoValidate) {
-      validationStore.runFullValidation()
+      validationStore.validateAfterPointMove(point.id)
       renderValidationIssues()
     }
   })
@@ -299,6 +299,8 @@ function renderContour(line: ReturnType<typeof useContourStore>['lines'][0]) {
   if (workspaceStore.showDepthLabels && line.points.length >= 2) {
     const midIdx = Math.floor(line.points.length / 2)
     const labelPos = line.points[midIdx]
+    const labelText = line.label || `${line.depth}m`
+    const labelWidth = Math.max(40, labelText.length * 10 + 12)
     const label = L.marker([labelPos.lat, labelPos.lng], {
       icon: L.divIcon({
         className: 'contour-label',
@@ -312,9 +314,9 @@ function renderContour(line: ReturnType<typeof useContourStore>['lines'][0]) {
           border: 1px solid ${line.color};
           white-space: nowrap;
           font-family: sans-serif;
-        ">${line.depth}m</div>`,
-        iconSize: [40, 18],
-        iconAnchor: [20, 9]
+        ">${labelText}</div>`,
+        iconSize: [labelWidth, 18],
+        iconAnchor: [labelWidth / 2, 9]
       }),
       interactive: false
     })

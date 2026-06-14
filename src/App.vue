@@ -42,6 +42,7 @@ const currentToolLabel = computed(() => {
   const map: Record<string, string> = {
     none: '选择模式',
     add_sounding: '添加测深点',
+    edit_point: '编辑测深点',
     draw_contour: '绘制等深线',
     move_node: '编辑节点',
     delete: '删除模式'
@@ -120,12 +121,15 @@ function handleKeydown(e: KeyboardEvent) {
       workspaceStore.setTool(ToolType.ADD_SOUNDING)
       break
     case '2':
-      workspaceStore.setTool(ToolType.DRAW_CONTOUR)
+      workspaceStore.setTool(ToolType.EDIT_POINT)
       break
     case '3':
-      workspaceStore.setTool(ToolType.MOVE_NODE)
+      workspaceStore.setTool(ToolType.DRAW_CONTOUR)
       break
     case '4':
+      workspaceStore.setTool(ToolType.MOVE_NODE)
+      break
+    case '5':
       workspaceStore.setTool(ToolType.DELETE)
       break
   }
@@ -213,7 +217,7 @@ function handleKeydown(e: KeyboardEvent) {
 
           <footer class="app-footer">
             <div class="footer-left">
-              <span class="shortcut-hint">快捷键: 1-测深点 | 2-等深线 | 3-编辑 | 4-删除 | Esc-取消 | Enter-完成</span>
+              <span class="shortcut-hint">快捷键: 1-添加测深点 | 2-编辑测深点 | 3-绘制等深线 | 4-编辑节点 | 5-删除 | Esc-取消 | Enter-完成</span>
             </div>
             <div class="footer-right">
               <span>缩放: {{ workspaceStore.mapZoom.toFixed(1) }}</span>

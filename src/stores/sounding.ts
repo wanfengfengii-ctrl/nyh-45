@@ -1,7 +1,8 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { SoundingPoint, LatLng, DepthStatistics } from '@/types'
-import { generateId, isPointNear } from '@/utils/geometry'
+import { generateId, isPointNear, pointToLineDistance } from '@/utils/geometry'
+import { useContourStore } from './contour'
 
 export const useSoundingStore = defineStore('sounding', () => {
   const points = ref<SoundingPoint[]>([])
@@ -108,8 +109,18 @@ export const useSoundingStore = defineStore('sounding', () => {
     return affectedContours
   }
 
-  function findAffectedContours(_pointId: string): string[] {
-    return []
+  function findAffectedContours(pointId: string): string[] {
+    const point = points.value.find((p) => p.id === pointId)
+    if (!point) return []
+    const contourStore = useContourStore()
+    const affected: string[] = []
+    for (const line of contourStore.lines) {
+      const dist = pointToLineDistance(point.position, line.points)
+      if (dist < 500) {
+        affected.push(line.id)
+      }
+    }
+    return affected
   }
 
   function selectPoint(id: string | null) {
@@ -143,6 +154,7 @@ export const useSoundingStore = defineStore('sounding', () => {
     selectPoint,
     getPointById,
     getPointsNear,
+    findAffectedContours,
     clearAll
   }
 })
