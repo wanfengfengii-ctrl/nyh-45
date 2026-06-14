@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { ChartProject, SoundingPoint, ContourLine, ExportOptions } from '@/types'
+import type { ChartProject, SoundingPoint, ContourLine, SectionLine, ExportOptions } from '@/types'
 import { ProjectStatus } from '@/types'
 import { generateId } from '@/utils/geometry'
 
@@ -24,7 +24,13 @@ export const useProjectStore = defineStore('project', () => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY)
       if (saved) {
-        projects.value = JSON.parse(saved) as ChartProject[]
+        const loaded = JSON.parse(saved) as ChartProject[]
+        loaded.forEach((p) => {
+          if (!Array.isArray(p.sections)) {
+            p.sections = []
+          }
+        })
+        projects.value = loaded
       }
       const current = localStorage.getItem(CURRENT_PROJECT_KEY)
       if (current && projects.value.some((p) => p.id === current)) {
@@ -58,6 +64,7 @@ export const useProjectStore = defineStore('project', () => {
       updatedAt: now,
       soundings: [],
       contours: [],
+      sections: [],
       mapCenter: { lat: 31.2304, lng: 121.4737 },
       mapZoom: 14,
       status: ProjectStatus.DRAFT
@@ -72,6 +79,7 @@ export const useProjectStore = defineStore('project', () => {
   function saveProject(
     soundings: SoundingPoint[],
     contours: ContourLine[],
+    sections: SectionLine[],
     mapCenter: { lat: number; lng: number },
     mapZoom: number
   ): ChartProject | null {
@@ -81,6 +89,7 @@ export const useProjectStore = defineStore('project', () => {
     }
     project.soundings = JSON.parse(JSON.stringify(soundings))
     project.contours = JSON.parse(JSON.stringify(contours))
+    project.sections = JSON.parse(JSON.stringify(sections))
     project.mapCenter = { ...mapCenter }
     project.mapZoom = mapZoom
     project.updatedAt = Date.now()
@@ -164,6 +173,9 @@ export const useProjectStore = defineStore('project', () => {
       const parsed = JSON.parse(json) as ChartProject
       if (!parsed.id || !parsed.name || !Array.isArray(parsed.soundings) || !Array.isArray(parsed.contours)) {
         return null
+      }
+      if (!Array.isArray(parsed.sections)) {
+        parsed.sections = []
       }
       const existing = projects.value.find((p) => p.id === parsed.id)
       if (existing) {

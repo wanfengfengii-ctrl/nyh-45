@@ -107,6 +107,7 @@ export interface ChartProject {
   updatedAt: number
   soundings: SoundingPoint[]
   contours: ContourLine[]
+  sections: SectionLine[]
   mapCenter: { lat: number; lng: number }
   mapZoom: number
   status: ProjectStatus

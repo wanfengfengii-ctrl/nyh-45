@@ -10,7 +10,7 @@ import { useContourStore } from '@/stores/contour'
 import { useValidationStore } from '@/stores/validation'
 import { useHistoryStore } from '@/stores/history'
 import { useSectionStore } from '@/stores/section'
-import { isPointNear, distance } from '@/utils/geometry'
+import { distance } from '@/utils/geometry'
 
 const emit = defineEmits<{
   (e: 'record-history', type: HistoryActionType, description: string): void
@@ -231,13 +231,13 @@ function renderSection(section: ReturnType<typeof useSectionStore>['sections'][0
   })
 
   polyline.on('click', (e) => {
-    L.DomEvent.stopPropagation(e)
     if (workspaceStore.currentTool === ToolType.DELETE) {
-      sectionStore.deleteSection(section.id)
-      renderAllSections()
       return
     }
+    L.DomEvent.stopPropagation(e)
     sectionStore.selectSection(section.id)
+    soundingStore.selectPoint(null)
+    contourStore.selectLine(null)
     renderAllSections()
   })
 
@@ -411,30 +411,87 @@ function renderSectionCrossings() {
 }
 
 function handleDeleteAt(pos: LatLng) {
+  type DeleteCandidate = {
+    type: 'sounding' | 'contour' | 'section'
+    id: string
+    distance: number
+    label: string
+  }
+
+  const candidates: DeleteCandidate[] = []
+
   for (const sp of soundingStore.points) {
-    if (isPointNear(sp.position, pos, 8)) {
-      soundingStore.deletePoint(sp.id)
-      renderAllSoundings()
-      recordHistory(HistoryActionType.DELETE_SOUNDING, `删除测深点 (${sp.depth.toFixed(1)}m)`)
-      if (validationStore.autoValidate) {
-        validationStore.validateAfterDelete(sp.id)
-        renderValidationIssues()
-      }
-      return
+    const d = distance(sp.position, pos)
+    if (d < 10) {
+      candidates.push({
+        type: 'sounding',
+        id: sp.id,
+        distance: d,
+        label: `测深点 (${sp.depth.toFixed(1)}m)`
+      })
     }
   }
+
   for (const line of contourStore.lines) {
     const d = computePointToLineDistance(pos, line.points)
-    if (d < 15) {
-      contourStore.deleteLine(line.id)
+    if (d < 20) {
+      candidates.push({
+        type: 'contour',
+        id: line.id,
+        distance: d * 0.7,
+        label: `等深线 (${line.depth}m)`
+      })
+    }
+  }
+
+  for (const section of sectionStore.sections) {
+    const d = computePointToLineDistance(pos, section.points)
+    if (d < 20) {
+      candidates.push({
+        type: 'section',
+        id: section.id,
+        distance: d * 0.7,
+        label: `断面 (${section.name})`
+      })
+    }
+  }
+
+  if (candidates.length === 0) return
+
+  candidates.sort((a, b) => a.distance - b.distance)
+  const target = candidates[0]
+
+  switch (target.type) {
+    case 'sounding':
+      soundingStore.deletePoint(target.id)
+      renderAllSoundings()
+      renderAllSections()
+      recordHistory(HistoryActionType.DELETE_SOUNDING, `删除${target.label}`)
+      if (validationStore.autoValidate) {
+        validationStore.validateAfterDelete(target.id)
+        renderValidationIssues()
+      }
+      if (sectionStore.selectedSectionId) {
+        sectionStore.analyzeSection(sectionStore.selectedSectionId)
+      }
+      break
+    case 'contour':
+      contourStore.deleteLine(target.id)
       renderAllContours()
-      recordHistory(HistoryActionType.DELETE_CONTOUR, `删除等深线 (${line.depth}m)`)
+      renderAllSections()
+      recordHistory(HistoryActionType.DELETE_CONTOUR, `删除${target.label}`)
       if (validationStore.autoValidate) {
         validationStore.runFullValidation()
         renderValidationIssues()
       }
-      return
-    }
+      if (sectionStore.selectedSectionId) {
+        sectionStore.analyzeSection(sectionStore.selectedSectionId)
+      }
+      break
+    case 'section':
+      sectionStore.deleteSection(target.id)
+      renderAllSections()
+      break
   }
 }
 
@@ -503,19 +560,13 @@ function renderSounding(point: ReturnType<typeof useSoundingStore>['points'][0])
     draggable: canDrag
   })
   marker.on('click', (e) => {
-    L.DomEvent.stopPropagation(e)
     if (workspaceStore.currentTool === ToolType.DELETE) {
-      soundingStore.deletePoint(point.id)
-      renderAllSoundings()
-      recordHistory(HistoryActionType.DELETE_SOUNDING, `删除测深点 (${point.depth.toFixed(1)}m)`)
-      if (validationStore.autoValidate) {
-        validationStore.validateAfterDelete(point.id)
-        renderValidationIssues()
-      }
       return
     }
+    L.DomEvent.stopPropagation(e)
     soundingStore.selectPoint(point.id)
     contourStore.selectLine(null)
+    sectionStore.selectSection(null)
     renderAllSoundings()
   })
   marker.on('dragstart', () => {
@@ -653,23 +704,17 @@ function renderContour(line: ReturnType<typeof useContourStore>['lines'][0]) {
   })
 
   polyline.on('click', (e) => {
-    L.DomEvent.stopPropagation(e)
     if (workspaceStore.currentTool === ToolType.DELETE) {
-      contourStore.deleteLine(line.id)
-      renderAllContours()
-      recordHistory(HistoryActionType.DELETE_CONTOUR, `删除等深线 (${line.depth}m)`)
-      if (validationStore.autoValidate) {
-        validationStore.runFullValidation()
-        renderValidationIssues()
-      }
       return
     }
+    L.DomEvent.stopPropagation(e)
     if (workspaceStore.currentTool === ToolType.MOVE_NODE) {
       contourStore.startEditingNodes(line.id)
     } else {
       contourStore.selectLine(line.id)
     }
     soundingStore.selectPoint(null)
+    sectionStore.selectSection(null)
     renderAllContours()
   })
   polyline.on('dblclick', (e) => {

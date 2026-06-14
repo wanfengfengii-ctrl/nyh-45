@@ -30,6 +30,7 @@ import { useContourStore } from './stores/contour'
 import { useSoundingStore } from './stores/sounding'
 import { useProjectStore } from './stores/project'
 import { useHistoryStore } from './stores/history'
+import { useSectionStore } from './stores/section'
 import { ToolType, HistoryActionType, type ExportOptions } from './types'
 
 const messageRef = ref<ReturnType<typeof useMessage> | null>(null)
@@ -55,6 +56,7 @@ const contourStore = useContourStore()
 const soundingStore = useSoundingStore()
 const projectStore = useProjectStore()
 const historyStore = useHistoryStore()
+const sectionStore = useSectionStore()
 
 const showNewProjectModal = ref(false)
 const showProjectListModal = ref(false)
@@ -282,6 +284,7 @@ function confirmNewProject() {
   }
   soundingStore.clearAll()
   contourStore.clearAll()
+  sectionStore.clearAll()
   validationStore.clearIssues()
   historyStore.clearHistory()
   workspaceStore.resetWorkspace()
@@ -305,6 +308,7 @@ function handleSaveProject() {
   const saved = projectStore.saveProject(
     soundingStore.points,
     contourStore.lines,
+    sectionStore.sections,
     workspaceStore.mapCenter,
     workspaceStore.mapZoom
   )
@@ -333,6 +337,7 @@ function confirmSaveAs() {
     projectStore.saveProject(
       soundingStore.points,
       contourStore.lines,
+      sectionStore.sections,
       workspaceStore.mapCenter,
       workspaceStore.mapZoom
     )
@@ -385,10 +390,14 @@ function doLoadProject(projectId: string) {
   }
   soundingStore.clearAll()
   contourStore.clearAll()
+  sectionStore.clearAll()
   validationStore.clearIssues()
   historyStore.clearHistory()
   project.soundings.forEach((p) => soundingStore.points.push(p))
   project.contours.forEach((l) => contourStore.lines.push(l))
+  if (project.sections && Array.isArray(project.sections)) {
+    project.sections.forEach((s) => sectionStore.sections.push(s))
+  }
   workspaceStore.updateMapCenter(project.mapCenter.lat, project.mapCenter.lng)
   workspaceStore.updateMapZoom(project.mapZoom)
   workspaceStore.setProjectStatus(project.status)
@@ -415,6 +424,7 @@ function handleDeleteProject(projectId: string, e: Event) {
         if (!projectStore.currentProjectId) {
           soundingStore.clearAll()
           contourStore.clearAll()
+          sectionStore.clearAll()
           workspaceStore.resetWorkspace()
         }
       }
