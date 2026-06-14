@@ -3,28 +3,20 @@ import { ref, computed } from 'vue'
 import type {
   HistoryAction,
   HistoryState,
-  HistoryActionType,
-  SoundingPoint,
-  ContourLine,
-  SectionLine
+  HistoryActionType
 } from '@/types'
 import { generateId } from '@/utils/geometry'
+import { useSoundingStore } from './sounding'
+import { useContourStore } from './contour'
+import { useSectionStore } from './section'
+import { useValidationStore } from './validation'
 
 const MAX_HISTORY_SIZE = 100
-
-type GetStateFn = () => {
-  soundings: SoundingPoint[]
-  contours: ContourLine[]
-  sections: SectionLine[]
-}
-type ApplyStateFn = (state: HistoryState) => void
 
 export const useHistoryStore = defineStore('history', () => {
   const actions = ref<HistoryAction[]>([])
   const currentIndex = ref<number>(-1)
   const isRestoring = ref(false)
-  let getStateFn: GetStateFn | null = null
-  let applyStateFn: ApplyStateFn | null = null
 
   const canUndo = computed(() => currentIndex.value >= 0)
   const canRedo = computed(() => currentIndex.value < actions.value.length - 1)
@@ -37,24 +29,43 @@ export const useHistoryStore = defineStore('history', () => {
     canRedo.value ? actions.value[currentIndex.value + 1] : null
   )
 
-  function registerStateHandlers(getFn: GetStateFn, applyFn: ApplyStateFn) {
-    getStateFn = getFn
-    applyStateFn = applyFn
-  }
-
   function cloneState(state: HistoryState): HistoryState {
     return {
-      soundings: JSON.parse(JSON.stringify(state.soundings)) as SoundingPoint[],
-      contours: JSON.parse(JSON.stringify(state.contours)) as ContourLine[],
-      sections: JSON.parse(JSON.stringify(state.sections || [])) as SectionLine[]
+      soundings: JSON.parse(JSON.stringify(state.soundings)),
+      contours: JSON.parse(JSON.stringify(state.contours)),
+      sections: JSON.parse(JSON.stringify(state.sections || []))
     }
   }
 
-  function getCurrentState(): HistoryState {
-    if (!getStateFn) {
-      return { soundings: [], contours: [], sections: [] }
+  function snapshot(): HistoryState {
+    const soundingStore = useSoundingStore()
+    const contourStore = useContourStore()
+    const sectionStore = useSectionStore()
+    return {
+      soundings: JSON.parse(JSON.stringify(soundingStore.points)),
+      contours: JSON.parse(JSON.stringify(contourStore.lines)),
+      sections: JSON.parse(JSON.stringify(sectionStore.sections))
     }
-    return cloneState(getStateFn())
+  }
+
+  function applyState(state: HistoryState): void {
+    const soundingStore = useSoundingStore()
+    const contourStore = useContourStore()
+    const sectionStore = useSectionStore()
+    const validationStore = useValidationStore()
+
+    soundingStore.clearAll()
+    contourStore.clearAll()
+    sectionStore.clearAll()
+    state.soundings.forEach((p) => soundingStore.points.push(p))
+    state.contours.forEach((l) => contourStore.lines.push(l))
+    if (state.sections && Array.isArray(state.sections)) {
+      state.sections.forEach((s) => sectionStore.sections.push(s))
+    }
+    validationStore.runFullValidation()
+    if (sectionStore.selectedSectionId) {
+      sectionStore.analyzeSection(sectionStore.selectedSectionId)
+    }
   }
 
   function recordAction(
@@ -63,8 +74,8 @@ export const useHistoryStore = defineStore('history', () => {
     beforeState?: HistoryState
   ): HistoryAction | null {
     if (isRestoring.value) return null
-    const before = beforeState ? cloneState(beforeState) : getCurrentState()
-    const after = getCurrentState()
+    const before = beforeState ? cloneState(beforeState) : snapshot()
+    const after = snapshot()
 
     const action: HistoryAction = {
       id: generateId(),
@@ -93,25 +104,25 @@ export const useHistoryStore = defineStore('history', () => {
   }
 
   function snapshotBefore(): HistoryState {
-    return getCurrentState()
+    return snapshot()
   }
 
   function undo(): boolean {
-    if (!canUndo.value || !applyStateFn) return false
+    if (!canUndo.value) return false
     isRestoring.value = true
     const action = actions.value[currentIndex.value]
     currentIndex.value--
-    applyStateFn(cloneState(action.beforeState))
+    applyState(cloneState(action.beforeState))
     isRestoring.value = false
     return true
   }
 
   function redo(): boolean {
-    if (!canRedo.value || !applyStateFn) return false
+    if (!canRedo.value) return false
     isRestoring.value = true
     currentIndex.value++
     const action = actions.value[currentIndex.value]
-    applyStateFn(cloneState(action.afterState))
+    applyState(cloneState(action.afterState))
     isRestoring.value = false
     return true
   }
@@ -119,6 +130,18 @@ export const useHistoryStore = defineStore('history', () => {
   function clearHistory() {
     actions.value = []
     currentIndex.value = -1
+  }
+
+  function recordWith<T>(
+    type: HistoryActionType,
+    description: string,
+    operation: () => T
+  ): T | null {
+    if (isRestoring.value) return operation()
+    const before = snapshot()
+    const result = operation()
+    recordAction(type, description, before)
+    return result
   }
 
   return {
@@ -129,10 +152,10 @@ export const useHistoryStore = defineStore('history', () => {
     canRedo,
     undoAction,
     redoAction,
-    registerStateHandlers,
-    getCurrentState,
-    recordAction,
+    snapshot,
     snapshotBefore,
+    recordAction,
+    recordWith,
     undo,
     redo,
     clearHistory

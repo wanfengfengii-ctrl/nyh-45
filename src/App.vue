@@ -32,6 +32,7 @@ import { useProjectStore } from './stores/project'
 import { useHistoryStore } from './stores/history'
 import { useSectionStore } from './stores/section'
 import { ToolType, HistoryActionType, type ExportOptions } from './types'
+import { downloadFile as exportServiceDownloadFile } from './services/ExportService'
 
 const messageRef = ref<ReturnType<typeof useMessage> | null>(null)
 const dialogRef = ref<ReturnType<typeof useDialog> | null>(null)
@@ -104,29 +105,6 @@ const statusLabel = computed(() => {
 })
 
 
-
-function applyHistoryState(state: { soundings: any[]; contours: any[]; sections: any[] }) {
-  soundingStore.clearAll()
-  contourStore.clearAll()
-  sectionStore.clearAll()
-  state.soundings.forEach((p) => soundingStore.points.push(p))
-  state.contours.forEach((l) => contourStore.lines.push(l))
-  if (state.sections && Array.isArray(state.sections)) {
-    state.sections.forEach((s) => sectionStore.sections.push(s))
-  }
-  validationStore.runFullValidation()
-  if (sectionStore.selectedSectionId) {
-    sectionStore.analyzeSection(sectionStore.selectedSectionId)
-  }
-}
-
-function getCurrentState() {
-  return {
-    soundings: JSON.parse(JSON.stringify(soundingStore.points)),
-    contours: JSON.parse(JSON.stringify(contourStore.lines)),
-    sections: JSON.parse(JSON.stringify(sectionStore.sections))
-  }
-}
 
 function recordHistory(type: HistoryActionType, description: string) {
   historyStore.recordAction(type, description)
@@ -470,28 +448,16 @@ function confirmExport() {
     mimeType = 'application/json'
   } else if (opts.format === 'csv') {
     const { soundingsCSV, contoursCSV } = projectStore.exportToCSV(soundingStore.points, contourStore.lines)
-    downloadFile(soundingsCSV, `${projectStore.currentProject?.name || 'chart'}_soundings.csv`, 'text/csv')
-    downloadFile(contoursCSV, `${projectStore.currentProject?.name || 'chart'}_contours.csv`, 'text/csv')
+    exportServiceDownloadFile(soundingsCSV, `${projectStore.currentProject?.name || 'chart'}_soundings.csv`, 'text/csv')
+    exportServiceDownloadFile(contoursCSV, `${projectStore.currentProject?.name || 'chart'}_contours.csv`, 'text/csv')
     showExportModal.value = false
     msg.success('CSV 文件已导出')
     return
   }
 
-  downloadFile(content, filename, mimeType)
+  exportServiceDownloadFile(content, filename, mimeType)
   showExportModal.value = false
   msg.success('文件已导出')
-}
-
-function downloadFile(content: string, filename: string, mimeType: string) {
-  const blob = new Blob([content], { type: mimeType })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  URL.revokeObjectURL(url)
 }
 
 function handleImportProject(file: File) {
@@ -608,7 +574,6 @@ function formatDate(ts: number): string {
 }
 
 onMounted(() => {
-  historyStore.registerStateHandlers(getCurrentState, applyHistoryState)
   projectStore.loadFromStorage()
   if (projectStore.currentProject) {
     const project = projectStore.currentProject

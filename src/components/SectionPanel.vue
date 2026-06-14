@@ -3,8 +3,13 @@ import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useSectionStore } from '@/stores/section'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useHistoryStore } from '@/stores/history'
-import { ToolType, HistoryActionType, type BatchSectionExportOptions } from '@/types'
-import type { SectionAnalysisResult } from '@/types'
+import { ToolType, HistoryActionType, type BatchSectionExportOptions, type SectionAnalysisResult } from '@/types'
+import { renderProfile, profileToDataURL } from '@/renderers/ProfileRenderer'
+import {
+  exportSectionToPNG as exportServiceExportPNG,
+  exportSectionToJSON as exportServiceExportJSON,
+  batchExportSections
+} from '@/services/ExportService'
 
 const sectionStore = useSectionStore()
 const workspaceStore = useWorkspaceStore()
@@ -93,44 +98,27 @@ function cancelEditName() {
 }
 
 function updateColor(sectionId: string, color: string) {
-  const beforeState = {
-    soundings: [],
-    contours: [],
-    sections: JSON.parse(JSON.stringify(sectionStore.sections))
-  }
-  sectionStore.updateSectionColor(sectionId, color)
-  historyStore.recordAction(
+  historyStore.recordWith(
     HistoryActionType.UPDATE_SECTION,
     `更新断面颜色`,
-    beforeState
+    () => sectionStore.updateSectionColor(sectionId, color)
   )
 }
 
 function updateName(sectionId: string, name: string) {
-  const beforeState = {
-    soundings: [],
-    contours: [],
-    sections: JSON.parse(JSON.stringify(sectionStore.sections))
-  }
-  sectionStore.updateSectionName(sectionId, name)
-  historyStore.recordAction(
+  historyStore.recordWith(
     HistoryActionType.UPDATE_SECTION,
     `更新断面名称`,
-    beforeState
+    () => sectionStore.updateSectionName(sectionId, name)
   )
 }
 
 function toggleArchive(sectionId: string) {
-  const beforeState = {
-    soundings: [],
-    contours: [],
-    sections: JSON.parse(JSON.stringify(sectionStore.sections))
-  }
-  sectionStore.toggleArchiveSection(sectionId)
-  historyStore.recordAction(
+  const desc = sectionStore.sections.find(s => s.id === sectionId)?.isArchived ? '恢复断面' : '归档断面'
+  historyStore.recordWith(
     HistoryActionType.UPDATE_SECTION,
-    sectionStore.sections.find(s => s.id === sectionId)?.isArchived ? '归档断面' : '恢复断面',
-    beforeState
+    desc,
+    () => sectionStore.toggleArchiveSection(sectionId)
   )
 }
 
@@ -170,245 +158,42 @@ function exitBatchExportMode() {
   }
 }
 
-function downloadFile(content: string, filename: string, mimeType: string) {
-  const blob = new Blob([content], { type: mimeType })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  URL.revokeObjectURL(url)
-}
-
 async function renderProfileToCanvas(sectionId: string): Promise<string | null> {
   const section = sectionStore.sections.find((s) => s.id === sectionId)
   if (!section?.analysisResult) return null
-
-  const canvas = document.createElement('canvas')
-  const ctx = canvas.getContext('2d')
-  if (!ctx) return null
-
-  const dpr = window.devicePixelRatio || 1
-  const width = 800
-  const height = 400
-  canvas.width = width * dpr
-  canvas.height = height * dpr
-  ctx.scale(dpr, dpr)
-
-  const padding = { top: 40, right: 30, bottom: 50, left: 60 }
-  const chartWidth = width - padding.left - padding.right
-  const chartHeight = height - padding.top - padding.bottom
-
-  ctx.fillStyle = '#ffffff'
-  ctx.fillRect(0, 0, width, height)
-
-  const stats = section.analysisResult.statistics
-  const maxDistance = stats.totalLength
-  const maxDepth = stats.maxDepth * 1.1
-  const minDepth = Math.max(0, stats.minDepth * 0.9)
-
-  ctx.strokeStyle = '#e0e0e0'
-  ctx.lineWidth = 1
-  ctx.font = '11px sans-serif'
-  ctx.fillStyle = '#666'
-
-  const yTicks = 5
-  for (let i = 0; i <= yTicks; i++) {
-    const y = padding.top + (chartHeight * i) / yTicks
-    const depth = maxDepth - ((maxDepth - minDepth) * i) / yTicks
-    ctx.beginPath()
-    ctx.moveTo(padding.left, y)
-    ctx.lineTo(width - padding.right, y)
-    ctx.stroke()
-    ctx.textAlign = 'right'
-    ctx.textBaseline = 'middle'
-    ctx.fillText(depth.toFixed(1) + 'm', padding.left - 8, y)
-  }
-
-  const xTicks = 5
-  for (let i = 0; i <= xTicks; i++) {
-    const x = padding.left + (chartWidth * i) / xTicks
-    const dist = (maxDistance * i) / xTicks
-    ctx.beginPath()
-    ctx.moveTo(x, padding.top)
-    ctx.lineTo(x, height - padding.bottom)
-    ctx.stroke()
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'top'
-    ctx.fillText(formatDistance(dist), x, height - padding.bottom + 8)
-  }
-
-  ctx.strokeStyle = '#333'
-  ctx.lineWidth = 1.5
-  ctx.beginPath()
-  ctx.moveTo(padding.left, padding.top)
-  ctx.lineTo(padding.left, height - padding.bottom)
-  ctx.lineTo(width - padding.right, height - padding.bottom)
-  ctx.stroke()
-
-  const points = section.analysisResult.soundingPoints
-  if (points.length >= 2) {
-    const gradient = ctx.createLinearGradient(0, padding.top, 0, height - padding.bottom)
-    gradient.addColorStop(0, 'rgba(33, 150, 243, 0.1)')
-    gradient.addColorStop(1, 'rgba(33, 150, 243, 0.5)')
-
-    ctx.beginPath()
-    ctx.moveTo(padding.left, height - padding.bottom)
-    points.forEach((p, idx) => {
-      const x = padding.left + (p.distance / maxDistance) * chartWidth
-      const y =
-        padding.top +
-        chartHeight -
-        ((p.point.depth - minDepth) / (maxDepth - minDepth)) * chartHeight
-      if (idx === 0) {
-        ctx.lineTo(x, y)
-      } else {
-        ctx.lineTo(x, y)
-      }
-    })
-    ctx.lineTo(padding.left + chartWidth, height - padding.bottom)
-    ctx.closePath()
-    ctx.fillStyle = gradient
-    ctx.fill()
-
-    ctx.beginPath()
-    points.forEach((p, idx) => {
-      const x = padding.left + (p.distance / maxDistance) * chartWidth
-      const y =
-        padding.top +
-        chartHeight -
-        ((p.point.depth - minDepth) / (maxDepth - minDepth)) * chartHeight
-      if (idx === 0) {
-        ctx.moveTo(x, y)
-      } else {
-        ctx.lineTo(x, y)
-      }
-    })
-    ctx.strokeStyle = '#1976d2'
-    ctx.lineWidth = 2.5
-    ctx.stroke()
-
-    points.forEach((p) => {
-      const x = padding.left + (p.distance / maxDistance) * chartWidth
-      const y =
-        padding.top +
-        chartHeight -
-        ((p.point.depth - minDepth) / (maxDepth - minDepth)) * chartHeight
-      ctx.beginPath()
-      ctx.arc(x, y, 4, 0, Math.PI * 2)
-      ctx.fillStyle = '#1976d2'
-      ctx.fill()
-      ctx.strokeStyle = 'white'
-      ctx.lineWidth = 1.5
-      ctx.stroke()
-    })
-  }
-
-  const crossings = section.analysisResult.contourCrossings
-  crossings.forEach((c) => {
-    const x = padding.left + (c.distance / maxDistance) * chartWidth
-    const y =
-      padding.top +
-      chartHeight -
-      ((c.contourDepth - minDepth) / (maxDepth - minDepth)) * chartHeight
-    const clampedY = Math.max(padding.top, Math.min(height - padding.bottom, y))
-
-    ctx.beginPath()
-    ctx.moveTo(x, padding.top)
-    ctx.lineTo(x, height - padding.bottom)
-    ctx.strokeStyle = c.direction === 'ascending' ? '#4caf50' : '#f44336'
-    ctx.lineWidth = 1
-    ctx.setLineDash([4, 4])
-    ctx.stroke()
-    ctx.setLineDash([])
-
-    ctx.beginPath()
-    ctx.arc(x, clampedY, 6, 0, Math.PI * 2)
-    ctx.fillStyle = c.direction === 'ascending' ? '#4caf50' : '#f44336'
-    ctx.fill()
-    ctx.strokeStyle = 'white'
-    ctx.lineWidth = 2
-    ctx.stroke()
-
-    ctx.fillStyle = c.direction === 'ascending' ? '#4caf50' : '#f44336'
-    ctx.font = 'bold 10px sans-serif'
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'bottom'
-    ctx.fillText(c.contourDepth + 'm', x, clampedY - 8)
-  })
-
-  const abnormalSegs = section.analysisResult.slopeSegments.filter((s) => s.isAbnormal)
-  abnormalSegs.forEach((seg) => {
-    const startX = padding.left + (seg.startDistance / maxDistance) * chartWidth
-    const endX = padding.left + (seg.endDistance / maxDistance) * chartWidth
-    const y = padding.top + 10
-
-    ctx.fillStyle = 'rgba(244, 67, 54, 0.3)'
-    ctx.fillRect(startX, y, endX - startX, 20)
-
-    ctx.fillStyle = '#d32f2f'
-    ctx.font = 'bold 10px sans-serif'
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'top'
-    const midX = (startX + endX) / 2
-    ctx.fillText('⚠', midX, y + 4)
-  })
-
-  ctx.fillStyle = '#333'
-  ctx.font = 'bold 14px sans-serif'
-  ctx.textAlign = 'left'
-  ctx.textBaseline = 'top'
-  ctx.fillText(section.name, padding.left, 10)
-
-  ctx.fillStyle = '#333'
-  ctx.font = '12px sans-serif'
-  ctx.textAlign = 'center'
-  ctx.textBaseline = 'bottom'
-  ctx.fillText('水深 (m)', padding.left / 2, height / 2)
-
-  ctx.save()
-  ctx.translate(width / 2, height - 12)
-  ctx.textAlign = 'center'
-  ctx.textBaseline = 'bottom'
-  ctx.fillText('沿断面距离', 0, 0)
-  ctx.restore()
-
-  return canvas.toDataURL('image/png')
+  return profileToDataURL(section.analysisResult, { title: section.name })
 }
 
 async function handleBatchExport() {
   if (!canExport.value) return
 
   const ids = Array.from(selectedExportIds.value)
+  const results: SectionAnalysisResult[] = []
   for (const id of ids) {
     const section = sectionStore.sections.find((s) => s.id === id)
-    if (!section) continue
-
-    const safeName = section.name.replace(/[<>:"/\\|?*]/g, '_')
-
-    if (exportOptions.value.format === 'json' || exportOptions.value.format === 'both') {
-      const json = sectionStore.exportSectionToJSON(id)
-      if (json) {
-        downloadFile(json, `${safeName}_分析结果.json`, 'application/json')
-        await new Promise((r) => setTimeout(r, 200))
-      }
-    }
-
-    if (exportOptions.value.format === 'png' || exportOptions.value.format === 'both') {
-      const dataUrl = await renderProfileToCanvas(id)
-      if (dataUrl) {
-        const link = document.createElement('a')
-        link.download = `${safeName}_剖面图.png`
-        link.href = dataUrl
-        document.body.appendChild(link)
-        link.click()
-        document.body.removeChild(link)
-        await new Promise((r) => setTimeout(r, 200))
-      }
+    if (section?.analysisResult) {
+      results.push(section.analysisResult)
     }
   }
+
+  const formats: ('png' | 'json')[] = []
+  if (exportOptions.value.format === 'png' || exportOptions.value.format === 'both') {
+    formats.push('png')
+  }
+  if (exportOptions.value.format === 'json' || exportOptions.value.format === 'both') {
+    formats.push('json')
+  }
+
+  let idx = 0
+  batchExportSections(results, {
+    formats,
+    onProgress: async () => {
+      idx++
+      if (idx < results.length) {
+        await new Promise((r) => setTimeout(r, 200))
+      }
+    }
+  })
 }
 
 function handleColorClick(section: any) {
@@ -447,217 +232,17 @@ function handleNameDoubleClick(section: any) {
 function drawProfile() {
   const canvas = profileCanvas.value
   if (!canvas || !result.value) return
-
-  const ctx = canvas.getContext('2d')
-  if (!ctx) return
-
-  const dpr = window.devicePixelRatio || 1
-  const rect = canvas.getBoundingClientRect()
-  canvas.width = rect.width * dpr
-  canvas.height = rect.height * dpr
-  ctx.scale(dpr, dpr)
-
-  const width = rect.width
-  const height = rect.height
-  const padding = { top: 40, right: 30, bottom: 50, left: 60 }
-  const chartWidth = width - padding.left - padding.right
-  const chartHeight = height - padding.top - padding.bottom
-
-  ctx.clearRect(0, 0, width, height)
-
-  const stats = result.value.statistics
-  const maxDistance = stats.totalLength
-  const maxDepth = stats.maxDepth * 1.1
-  const minDepth = Math.max(0, stats.minDepth * 0.9)
-
-  ctx.strokeStyle = '#e0e0e0'
-  ctx.lineWidth = 1
-  ctx.font = '11px sans-serif'
-  ctx.fillStyle = '#666'
-
-  const yTicks = 5
-  for (let i = 0; i <= yTicks; i++) {
-    const y = padding.top + (chartHeight * i) / yTicks
-    const depth = maxDepth - ((maxDepth - minDepth) * i) / yTicks
-    ctx.beginPath()
-    ctx.moveTo(padding.left, y)
-    ctx.lineTo(width - padding.right, y)
-    ctx.stroke()
-    ctx.textAlign = 'right'
-    ctx.textBaseline = 'middle'
-    ctx.fillText(depth.toFixed(1) + 'm', padding.left - 8, y)
-  }
-
-  const xTicks = 5
-  for (let i = 0; i <= xTicks; i++) {
-    const x = padding.left + (chartWidth * i) / xTicks
-    const dist = (maxDistance * i) / xTicks
-    ctx.beginPath()
-    ctx.moveTo(x, padding.top)
-    ctx.lineTo(x, height - padding.bottom)
-    ctx.stroke()
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'top'
-    ctx.fillText(formatDistance(dist), x, height - padding.bottom + 8)
-  }
-
-  ctx.strokeStyle = '#333'
-  ctx.lineWidth = 1.5
-  ctx.beginPath()
-  ctx.moveTo(padding.left, padding.top)
-  ctx.lineTo(padding.left, height - padding.bottom)
-  ctx.lineTo(width - padding.right, height - padding.bottom)
-  ctx.stroke()
-
-  const points = result.value.soundingPoints
-  if (points.length >= 2) {
-    const gradient = ctx.createLinearGradient(0, padding.top, 0, height - padding.bottom)
-    gradient.addColorStop(0, 'rgba(33, 150, 243, 0.1)')
-    gradient.addColorStop(1, 'rgba(33, 150, 243, 0.5)')
-
-    ctx.beginPath()
-    ctx.moveTo(padding.left, height - padding.bottom)
-    points.forEach((p, idx) => {
-      const x = padding.left + (p.distance / maxDistance) * chartWidth
-      const y =
-        padding.top +
-        chartHeight -
-        ((p.point.depth - minDepth) / (maxDepth - minDepth)) * chartHeight
-      if (idx === 0) {
-        ctx.lineTo(x, y)
-      } else {
-        ctx.lineTo(x, y)
-      }
-    })
-    ctx.lineTo(padding.left + chartWidth, height - padding.bottom)
-    ctx.closePath()
-    ctx.fillStyle = gradient
-    ctx.fill()
-
-    ctx.beginPath()
-    points.forEach((p, idx) => {
-      const x = padding.left + (p.distance / maxDistance) * chartWidth
-      const y =
-        padding.top +
-        chartHeight -
-        ((p.point.depth - minDepth) / (maxDepth - minDepth)) * chartHeight
-      if (idx === 0) {
-        ctx.moveTo(x, y)
-      } else {
-        ctx.lineTo(x, y)
-      }
-    })
-    ctx.strokeStyle = '#1976d2'
-    ctx.lineWidth = 2.5
-    ctx.stroke()
-
-    points.forEach((p) => {
-      const x = padding.left + (p.distance / maxDistance) * chartWidth
-      const y =
-        padding.top +
-        chartHeight -
-        ((p.point.depth - minDepth) / (maxDepth - minDepth)) * chartHeight
-      ctx.beginPath()
-      ctx.arc(x, y, 4, 0, Math.PI * 2)
-      ctx.fillStyle = '#1976d2'
-      ctx.fill()
-      ctx.strokeStyle = 'white'
-      ctx.lineWidth = 1.5
-      ctx.stroke()
-    })
-  }
-
-  const crossings = result.value.contourCrossings
-  crossings.forEach((c) => {
-    const x = padding.left + (c.distance / maxDistance) * chartWidth
-    const y =
-      padding.top +
-      chartHeight -
-      ((c.contourDepth - minDepth) / (maxDepth - minDepth)) * chartHeight
-    const clampedY = Math.max(padding.top, Math.min(height - padding.bottom, y))
-
-    ctx.beginPath()
-    ctx.moveTo(x, padding.top)
-    ctx.lineTo(x, height - padding.bottom)
-    ctx.strokeStyle = c.direction === 'ascending' ? '#4caf50' : '#f44336'
-    ctx.lineWidth = 1
-    ctx.setLineDash([4, 4])
-    ctx.stroke()
-    ctx.setLineDash([])
-
-    ctx.beginPath()
-    ctx.arc(x, clampedY, 6, 0, Math.PI * 2)
-    ctx.fillStyle = c.direction === 'ascending' ? '#4caf50' : '#f44336'
-    ctx.fill()
-    ctx.strokeStyle = 'white'
-    ctx.lineWidth = 2
-    ctx.stroke()
-
-    ctx.fillStyle = c.direction === 'ascending' ? '#4caf50' : '#f44336'
-    ctx.font = 'bold 10px sans-serif'
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'bottom'
-    ctx.fillText(c.contourDepth + 'm', x, clampedY - 8)
-  })
-
-  const abnormalSegs = result.value.slopeSegments.filter((s) => s.isAbnormal)
-  abnormalSegs.forEach((seg) => {
-    const startX = padding.left + (seg.startDistance / maxDistance) * chartWidth
-    const endX = padding.left + (seg.endDistance / maxDistance) * chartWidth
-    const y = padding.top + 10
-
-    ctx.fillStyle = 'rgba(244, 67, 54, 0.3)'
-    ctx.fillRect(startX, y, endX - startX, 20)
-
-    ctx.fillStyle = '#d32f2f'
-    ctx.font = 'bold 10px sans-serif'
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'top'
-    const midX = (startX + endX) / 2
-    ctx.fillText('⚠', midX, y + 4)
-  })
-
-  ctx.fillStyle = '#333'
-  ctx.font = 'bold 12px sans-serif'
-  ctx.textAlign = 'center'
-  ctx.textBaseline = 'bottom'
-  ctx.fillText('水深 (m)', padding.left / 2, height / 2)
-
-  ctx.save()
-  ctx.translate(width / 2, height - 12)
-  ctx.textAlign = 'center'
-  ctx.textBaseline = 'bottom'
-  ctx.fillText('沿断面距离', 0, 0)
-  ctx.restore()
-
-  ctx.fillStyle = '#1976d2'
-  ctx.font = 'bold 13px sans-serif'
-  ctx.textAlign = 'left'
-  ctx.textBaseline = 'top'
-  ctx.fillText(result.value.sectionName, padding.left, 10)
+  renderProfile(canvas, result.value, { showTitle: true, title: result.value.sectionName })
 }
 
 function exportToPNG() {
-  const canvas = profileCanvas.value
-  if (!canvas) return
-
-  const link = document.createElement('a')
-  link.download = `${result.value?.sectionName || '断面'}_剖面图.png`
-  link.href = canvas.toDataURL('image/png')
-  link.click()
+  if (!result.value) return
+  exportServiceExportPNG(result.value, { title: result.value.sectionName })
 }
 
 function exportToJSON() {
-  const json = sectionStore.exportToJSON()
-  if (!json) return
-
-  const blob = new Blob([json], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.download = `${result.value?.sectionName || '断面'}_分析结果.json`
-  link.href = url
-  link.click()
-  URL.revokeObjectURL(url)
+  if (!result.value) return
+  exportServiceExportJSON(result.value)
 }
 
 watch(

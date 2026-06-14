@@ -53,18 +53,10 @@ const cursorStyle = computed(() => {
   }
 })
 
-let dragStartState: { soundings: any[]; contours: any[] } | null = null
+let dragStartPos: { lat: number; lng: number } | null = null
 
 function recordHistory(type: HistoryActionType, description: string) {
   historyStore.recordAction(type, description)
-}
-
-function snapshotState() {
-  return {
-    soundings: JSON.parse(JSON.stringify(soundingStore.points)),
-    contours: JSON.parse(JSON.stringify(contourStore.lines)),
-    sections: JSON.parse(JSON.stringify(sectionStore.sections))
-  }
 }
 
 function initMap() {
@@ -209,15 +201,13 @@ function clearTempSectionDrawing() {
 }
 
 function finishSectionDrawing() {
-  const beforeState = snapshotState()
   const section = sectionStore.finishDrawing()
   clearTempSectionDrawing()
   if (section) {
     renderAllSections()
     historyStore.recordAction(
       HistoryActionType.ADD_SECTION,
-      `添加断面 (${section.name})`,
-      beforeState
+      `添加断面 (${section.name})`
     )
   }
 }
@@ -262,17 +252,12 @@ function renderSection(section: ReturnType<typeof useSectionStore>['sections'][0
         const pt = mapInst.latLngToContainerPoint(e.latlng)
         const idx = findNearestSegmentIndex(pt, section.points)
         if (idx >= 0) {
-          const beforeState = snapshotState()
           sectionStore.addNode(section.id, { lat: e.latlng.lat, lng: e.latlng.lng }, idx)
           renderAllSections()
-          recordHistory(HistoryActionType.UPDATE_SECTION, `添加断面节点 (${section.name})`)
-          if (beforeState) {
-            historyStore.recordAction(
-              HistoryActionType.UPDATE_SECTION,
-              `添加断面节点 (${section.name})`,
-              beforeState
-            )
-          }
+          historyStore.recordAction(
+            HistoryActionType.UPDATE_SECTION,
+            `添加断面节点 (${section.name})`
+          )
         }
       }
     }
@@ -388,7 +373,7 @@ function renderSectionEditingNodes() {
 
   const nodes = section.points
   nodes.forEach((point, idx) => {
-    let nodeBeforeState: { soundings: any[]; contours: any[]; sections: any[] } | null = null
+    let nodeDragging = false
 
     const marker = L.marker([point.lat, point.lng], {
       icon: L.divIcon({
@@ -407,7 +392,7 @@ function renderSectionEditingNodes() {
       draggable: true
     })
     marker.on('dragstart', () => {
-      nodeBeforeState = snapshotState()
+      nodeDragging = true
     })
     marker.on('drag', () => {
       const pos = marker.getLatLng()
@@ -415,25 +400,22 @@ function renderSectionEditingNodes() {
       renderAllSections()
     })
     marker.on('dragend', () => {
-      if (nodeBeforeState) {
+      if (nodeDragging) {
         historyStore.recordAction(
           HistoryActionType.UPDATE_SECTION,
-          `编辑断面节点 (${section.name})`,
-          nodeBeforeState
+          `编辑断面节点 (${section.name})`
         )
       }
-      nodeBeforeState = null
+      nodeDragging = false
     })
     marker.on('contextmenu', (e) => {
       L.DomEvent.stopPropagation(e)
       if (section.points.length > 3) {
-        const beforeState = snapshotState()
         sectionStore.removeNode(section.id, idx)
         renderAllSections()
         historyStore.recordAction(
           HistoryActionType.UPDATE_SECTION,
-          `删除断面节点 (${section.name})`,
-          beforeState
+          `删除断面节点 (${section.name})`
         )
       }
     })
@@ -669,13 +651,11 @@ function handleDeleteAt(pos: LatLng) {
       }
       break
     case 'section': {
-      const beforeState = snapshotState()
       sectionStore.deleteSection(target.id)
       renderAllSections()
       historyStore.recordAction(
         HistoryActionType.DELETE_SECTION,
-        `删除${target.label}`,
-        beforeState
+        `删除${target.label}`
       )
       break
     }
@@ -757,7 +737,7 @@ function renderSounding(point: ReturnType<typeof useSoundingStore>['points'][0])
     renderAllSoundings()
   })
   marker.on('dragstart', () => {
-    dragStartState = snapshotState()
+    dragStartPos = { lat: point.position.lat, lng: point.position.lng }
     marker.setIcon(createSoundingIcon(point.depth, isSelected, true))
   })
   marker.on('drag', () => {
@@ -772,17 +752,13 @@ function renderSounding(point: ReturnType<typeof useSoundingStore>['points'][0])
       position: { lat: pos.lat, lng: pos.lng }
     })
     marker.setIcon(createSoundingIcon(point.depth, isSelected, false))
-    if (dragStartState) {
-      const newPts = soundingStore.points
-      const moved = newPts.find(p => p.id === point.id)
-      if (moved && dragStartState.soundings.find(s => s.id === point.id)) {
-        const orig = dragStartState.soundings.find(s => s.id === point.id)
-        if (orig && distance(orig.position, moved.position) > 0.1) {
-          recordHistory(HistoryActionType.UPDATE_SOUNDING, `移动测深点 (${moved.depth.toFixed(1)}m)`)
-        }
+    if (dragStartPos) {
+      const movedDistance = distance(dragStartPos, { lat: pos.lat, lng: pos.lng })
+      if (movedDistance > 0.1) {
+        recordHistory(HistoryActionType.UPDATE_SOUNDING, `移动测深点 (${point.depth.toFixed(1)}m)`)
       }
     }
-    dragStartState = null
+    dragStartPos = null
     if (validationStore.autoValidate) {
       validationStore.validateAfterPointMove(point.id)
       renderValidationIssues()
@@ -1015,7 +991,7 @@ function renderEditingNodes() {
   const nodes = isClosed ? line.points.slice(0, -1) : line.points
 
   nodes.forEach((point, idx) => {
-    let nodeBeforeState: { soundings: any[]; contours: any[] } | null = null
+    let nodeDragging = false
 
     const marker = L.marker([point.lat, point.lng], {
       icon: L.divIcon({
@@ -1034,7 +1010,7 @@ function renderEditingNodes() {
       draggable: true
     })
     marker.on('dragstart', () => {
-      nodeBeforeState = snapshotState()
+      nodeDragging = true
     })
     marker.on('drag', () => {
       const pos = marker.getLatLng()
@@ -1042,10 +1018,10 @@ function renderEditingNodes() {
       renderAllContours()
     })
     marker.on('dragend', () => {
-      if (nodeBeforeState) {
+      if (nodeDragging) {
         recordHistory(HistoryActionType.UPDATE_CONTOUR, `编辑等深线节点 (${line.depth}m)`)
       }
-      nodeBeforeState = null
+      nodeDragging = false
       if (validationStore.autoValidate) {
         validationStore.runFullValidation()
         renderValidationIssues()
