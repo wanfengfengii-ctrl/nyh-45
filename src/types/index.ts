@@ -75,8 +75,71 @@ export interface DepthStatistics {
   areaCoverage: number
 }
 
+export enum ProjectStatus {
+  DRAFT = 'draft',
+  PENDING_REVIEW = 'pending_review',
+  REVIEWED = 'reviewed',
+  COMPLETED = 'completed'
+}
+
 export interface WorkspaceStatus {
   isCompleted: boolean
   completedAt?: number
   hasCriticalErrors: boolean
+  projectStatus?: ProjectStatus
+  submittedAt?: number
+}
+
+export interface BaseMapLayer {
+  id: string
+  name: string
+  url: string
+  attribution?: string
+  maxZoom?: number
+}
+
+export interface ChartProject {
+  id: string
+  name: string
+  description?: string
+  createdAt: number
+  updatedAt: number
+  soundings: SoundingPoint[]
+  contours: ContourLine[]
+  mapCenter: { lat: number; lng: number }
+  mapZoom: number
+  status: ProjectStatus
+  author?: string
+}
+
+export interface HistoryAction {
+  id: string
+  type: HistoryActionType
+  timestamp: number
+  description: string
+  beforeState: HistoryState
+  afterState: HistoryState
+}
+
+export enum HistoryActionType {
+  ADD_SOUNDING = 'add_sounding',
+  UPDATE_SOUNDING = 'update_sounding',
+  DELETE_SOUNDING = 'delete_sounding',
+  ADD_CONTOUR = 'add_contour',
+  UPDATE_CONTOUR = 'update_contour',
+  DELETE_CONTOUR = 'delete_contour',
+  BATCH_OPERATION = 'batch_operation',
+  CLEAR_ALL = 'clear_all'
+}
+
+export interface HistoryState {
+  soundings: SoundingPoint[]
+  contours: ContourLine[]
+}
+
+export interface ExportOptions {
+  format: 'geojson' | 'csv' | 'json'
+  includeSoundings: boolean
+  includeContours: boolean
+  includeMetadata: boolean
 }
