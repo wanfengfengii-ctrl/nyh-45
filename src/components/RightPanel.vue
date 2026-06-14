@@ -5,8 +5,9 @@ import { useSoundingStore } from '@/stores/sounding'
 import { useContourStore } from '@/stores/contour'
 import { useValidationStore } from '@/stores/validation'
 import { useProjectStore } from '@/stores/project'
-import { ValidationSeverity, ToolType, ProjectStatus } from '@/types'
+import { ValidationSeverity, ToolType, ProjectStatus, HistoryActionType } from '@/types'
 import type { ValidationIssue } from '@/types'
+import { useHistoryStore } from '@/stores/history'
 import StatisticsPanel from './StatisticsPanel.vue'
 
 const workspaceStore = useWorkspaceStore()
@@ -14,6 +15,7 @@ const soundingStore = useSoundingStore()
 const contourStore = useContourStore()
 const validationStore = useValidationStore()
 const projectStore = useProjectStore()
+const historyStore = useHistoryStore()
 
 function formatPosition(lat: number, lng: number): string {
   return `${lat.toFixed(5)}, ${lng.toFixed(5)}`
@@ -48,6 +50,7 @@ function updateSoundingDepth(id: string, value: string) {
   if (!isNaN(depth)) {
     const orig = soundingStore.getPointById(id)
     if (orig && Math.abs(orig.depth - depth) > 0.001) {
+      historyStore.recordAction(HistoryActionType.UPDATE_SOUNDING, `修改测深点深度 ${orig.depth.toFixed(1)}m → ${depth.toFixed(1)}m`)
       soundingStore.updatePoint(id, { depth })
       if (validationStore.autoValidate) {
         validationStore.validateAfterPointMove(id)
@@ -57,12 +60,17 @@ function updateSoundingDepth(id: string, value: string) {
 }
 
 function updateSoundingNote(id: string, value: string) {
+  const orig = soundingStore.getPointById(id)
+  historyStore.recordAction(HistoryActionType.UPDATE_SOUNDING, `修改测深点备注`)
   soundingStore.updatePoint(id, { note: value })
+  void orig
 }
 
 function updateContourDepth(id: string, value: string) {
   const depth = parseFloat(value)
   if (!isNaN(depth)) {
+    const orig = contourStore.lines.find(l => l.id === id)
+    historyStore.recordAction(HistoryActionType.UPDATE_CONTOUR, `修改等深线深度 ${orig?.depth ?? '?'}m → ${depth}m`)
     contourStore.updateLine(id, { depth })
     if (validationStore.autoValidate) {
       validationStore.runFullValidation()
@@ -71,6 +79,7 @@ function updateContourDepth(id: string, value: string) {
 }
 
 function updateContourLabel(id: string, value: string) {
+  historyStore.recordAction(HistoryActionType.UPDATE_CONTOUR, `修改等深线标签`)
   contourStore.updateLine(id, { label: value })
 }
 
@@ -98,8 +107,10 @@ function toggleContourClosed(id: string) {
     if (Math.abs(first.lat - last.lat) > 0.00001 || Math.abs(first.lng - last.lng) > 0.00001) {
       pts.push({ ...first })
     }
+    historyStore.recordAction(HistoryActionType.UPDATE_CONTOUR, `闭合等深线 (${line.depth}m)`)
     contourStore.updateLine(id, { isClosed: true, points: pts })
   } else if (line.isClosed && pts.length >= 4) {
+    historyStore.recordAction(HistoryActionType.UPDATE_CONTOUR, `打开等深线 (${line.depth}m)`)
     contourStore.updateLine(id, { isClosed: false, points: pts.slice(0, -1) })
   }
   if (validationStore.autoValidate) {

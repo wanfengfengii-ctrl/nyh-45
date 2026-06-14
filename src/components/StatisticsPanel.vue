@@ -38,8 +38,8 @@ const maxDistributionCount = computed(() => {
 })
 
 function formatArea(sqMeters: number): string {
-  if (sqMeters < 1000) return `${sqMeters.toFixed(0)} m²`
-  if (sqMeters < 1000000) return `${(sqMeters / 1000).toFixed(2)} km²`
+  if (sqMeters < 10000) return `${sqMeters.toFixed(0)} m²`
+  if (sqMeters < 1000000) return `${(sqMeters / 10000).toFixed(2)} ha (${(sqMeters / 10000).toFixed(2)} 公顷)`
   return `${(sqMeters / 1000000).toFixed(2)} km²`
 }
 </script>

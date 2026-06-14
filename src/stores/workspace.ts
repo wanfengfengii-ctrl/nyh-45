@@ -170,6 +170,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     status.value = {
       ...status.value,
+      isCompleted: false,
+      completedAt: undefined,
       projectStatus: ProjectStatus.PENDING_REVIEW,
       submittedAt: Date.now()
     }
@@ -183,6 +185,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const projectStore = useProjectStore()
     status.value = {
       ...status.value,
+      isCompleted: false,
+      completedAt: undefined,
       projectStatus: ProjectStatus.DRAFT,
       submittedAt: undefined
     }
@@ -195,6 +199,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const projectStore = useProjectStore()
     status.value = {
       ...status.value,
+      isCompleted: false,
+      completedAt: undefined,
       projectStatus: ProjectStatus.REVIEWED
     }
     if (projectStore.currentProjectId) {
@@ -212,6 +218,15 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   function setProjectStatus(statusVal: ProjectStatus) {
     status.value.projectStatus = statusVal
+    if (statusVal === ProjectStatus.COMPLETED) {
+      status.value.isCompleted = true
+      if (!status.value.completedAt) {
+        status.value.completedAt = Date.now()
+      }
+    } else {
+      status.value.isCompleted = false
+      status.value.completedAt = undefined
+    }
   }
 
   function resetWorkspace() {

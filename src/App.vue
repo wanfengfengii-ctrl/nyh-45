@@ -30,7 +30,7 @@ import { useContourStore } from './stores/contour'
 import { useSoundingStore } from './stores/sounding'
 import { useProjectStore } from './stores/project'
 import { useHistoryStore } from './stores/history'
-import { ToolType, ProjectStatus, HistoryActionType, type ExportOptions } from './types'
+import { ToolType, HistoryActionType, type ExportOptions } from './types'
 
 const messageRef = ref<ReturnType<typeof useMessage> | null>(null)
 const dialogRef = ref<ReturnType<typeof useDialog> | null>(null)
@@ -391,9 +391,6 @@ function doLoadProject(projectId: string) {
   workspaceStore.updateMapCenter(project.mapCenter.lat, project.mapCenter.lng)
   workspaceStore.updateMapZoom(project.mapZoom)
   workspaceStore.setProjectStatus(project.status)
-  if (project.status === ProjectStatus.COMPLETED) {
-    workspaceStore.status.isCompleted = true
-  }
   showProjectListModal.value = false
   validationStore.runFullValidation()
   msg.success(`已打开项目: ${project.name}`)
@@ -589,9 +586,6 @@ onMounted(() => {
     workspaceStore.updateMapCenter(project.mapCenter.lat, project.mapCenter.lng)
     workspaceStore.updateMapZoom(project.mapZoom)
     workspaceStore.setProjectStatus(project.status)
-    if (project.status === ProjectStatus.COMPLETED) {
-      workspaceStore.status.isCompleted = true
-    }
     validationStore.runFullValidation()
   }
 })
