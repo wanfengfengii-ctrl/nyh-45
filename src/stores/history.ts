@@ -5,13 +5,18 @@ import type {
   HistoryState,
   HistoryActionType,
   SoundingPoint,
-  ContourLine
+  ContourLine,
+  SectionLine
 } from '@/types'
 import { generateId } from '@/utils/geometry'
 
 const MAX_HISTORY_SIZE = 100
 
-type GetStateFn = () => { soundings: SoundingPoint[]; contours: ContourLine[] }
+type GetStateFn = () => {
+  soundings: SoundingPoint[]
+  contours: ContourLine[]
+  sections: SectionLine[]
+}
 type ApplyStateFn = (state: HistoryState) => void
 
 export const useHistoryStore = defineStore('history', () => {
@@ -40,13 +45,14 @@ export const useHistoryStore = defineStore('history', () => {
   function cloneState(state: HistoryState): HistoryState {
     return {
       soundings: JSON.parse(JSON.stringify(state.soundings)) as SoundingPoint[],
-      contours: JSON.parse(JSON.stringify(state.contours)) as ContourLine[]
+      contours: JSON.parse(JSON.stringify(state.contours)) as ContourLine[],
+      sections: JSON.parse(JSON.stringify(state.sections || [])) as SectionLine[]
     }
   }
 
   function getCurrentState(): HistoryState {
     if (!getStateFn) {
-      return { soundings: [], contours: [] }
+      return { soundings: [], contours: [], sections: [] }
     }
     return cloneState(getStateFn())
   }

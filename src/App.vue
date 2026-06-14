@@ -105,18 +105,26 @@ const statusLabel = computed(() => {
 
 
 
-function applyHistoryState(state: { soundings: any[]; contours: any[] }) {
+function applyHistoryState(state: { soundings: any[]; contours: any[]; sections: any[] }) {
   soundingStore.clearAll()
   contourStore.clearAll()
+  sectionStore.clearAll()
   state.soundings.forEach((p) => soundingStore.points.push(p))
   state.contours.forEach((l) => contourStore.lines.push(l))
+  if (state.sections && Array.isArray(state.sections)) {
+    state.sections.forEach((s) => sectionStore.sections.push(s))
+  }
   validationStore.runFullValidation()
+  if (sectionStore.selectedSectionId) {
+    sectionStore.analyzeSection(sectionStore.selectedSectionId)
+  }
 }
 
 function getCurrentState() {
   return {
     soundings: JSON.parse(JSON.stringify(soundingStore.points)),
-    contours: JSON.parse(JSON.stringify(contourStore.lines))
+    contours: JSON.parse(JSON.stringify(contourStore.lines)),
+    sections: JSON.parse(JSON.stringify(sectionStore.sections))
   }
 }
 
@@ -403,6 +411,14 @@ function doLoadProject(projectId: string) {
   workspaceStore.setProjectStatus(project.status)
   showProjectListModal.value = false
   validationStore.runFullValidation()
+  
+  if (sectionStore.sections.length > 0) {
+    const firstSection = sectionStore.sections.find((s) => !s.isArchived)
+    if (firstSection) {
+      sectionStore.selectSection(firstSection.id)
+    }
+  }
+  
   msg.success(`已打开项目: ${project.name}`)
 }
 
@@ -606,7 +622,24 @@ onMounted(() => {
 })
 
 watch(
-  () => [soundingStore.points.length, contourStore.lines.length],
+  () => [soundingStore.points.length, contourStore.lines.length, sectionStore.sections.length],
+  () => {
+    if (projectStore.currentProjectId) {
+      projectStore.markDirty()
+    }
+  },
+  { deep: true }
+)
+
+watch(
+  () => sectionStore.sections.map((s) => ({
+    id: s.id,
+    name: s.name,
+    color: s.color,
+    points: s.points.length,
+    isArchived: s.isArchived,
+    analysisResult: s.analysisResult
+  })),
   () => {
     if (projectStore.currentProjectId) {
       projectStore.markDirty()

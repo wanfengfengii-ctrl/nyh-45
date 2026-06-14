@@ -130,6 +130,9 @@ export enum HistoryActionType {
   ADD_CONTOUR = 'add_contour',
   UPDATE_CONTOUR = 'update_contour',
   DELETE_CONTOUR = 'delete_contour',
+  ADD_SECTION = 'add_section',
+  UPDATE_SECTION = 'update_section',
+  DELETE_SECTION = 'delete_section',
   BATCH_OPERATION = 'batch_operation',
   CLEAR_ALL = 'clear_all'
 }
@@ -137,6 +140,7 @@ export enum HistoryActionType {
 export interface HistoryState {
   soundings: SoundingPoint[]
   contours: ContourLine[]
+  sections: SectionLine[]
 }
 
 export interface ExportOptions {
@@ -151,7 +155,11 @@ export interface SectionLine {
   name: string
   points: LatLng[]
   createdAt: number
+  updatedAt: number
   color: string
+  analysisResult?: SectionAnalysisResult
+  isArchived?: boolean
+  note?: string
 }
 
 export interface SectionSoundingPoint {
@@ -209,4 +217,13 @@ export interface SectionExportOptions {
   includeProfile: boolean
   includeStatistics: boolean
   includeRawData: boolean
+}
+
+export interface BatchSectionExportOptions {
+  sectionIds: string[]
+  format: 'png' | 'json' | 'both'
+  includeProfile: boolean
+  includeStatistics: boolean
+  includeRawData: boolean
+  bundleAsZip?: boolean
 }

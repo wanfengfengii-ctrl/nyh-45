@@ -30,6 +30,8 @@ const tempSectionLayer = shallowRef<L.Polyline | null>(null)
 const tempSectionMarkers = shallowRef<L.Marker[]>([])
 const sectionPointMarkers = shallowRef<Map<string, L.Marker>>(new Map())
 const sectionCrossingMarkers = shallowRef<Map<string, L.Marker>>(new Map())
+const editingSectionNodeMarkers = shallowRef<Map<string, L.Marker>>(new Map())
+const abnormalSlopeLayers = shallowRef<Map<string, L.Layer>>(new Map())
 
 const workspaceStore = useWorkspaceStore()
 const soundingStore = useSoundingStore()
@@ -60,7 +62,8 @@ function recordHistory(type: HistoryActionType, description: string) {
 function snapshotState() {
   return {
     soundings: JSON.parse(JSON.stringify(soundingStore.points)),
-    contours: JSON.parse(JSON.stringify(contourStore.lines))
+    contours: JSON.parse(JSON.stringify(contourStore.lines)),
+    sections: JSON.parse(JSON.stringify(sectionStore.sections))
   }
 }
 
@@ -206,10 +209,16 @@ function clearTempSectionDrawing() {
 }
 
 function finishSectionDrawing() {
+  const beforeState = snapshotState()
   const section = sectionStore.finishDrawing()
   clearTempSectionDrawing()
   if (section) {
     renderAllSections()
+    historyStore.recordAction(
+      HistoryActionType.ADD_SECTION,
+      `添加断面 (${section.name})`,
+      beforeState
+    )
   }
 }
 
@@ -235,10 +244,38 @@ function renderSection(section: ReturnType<typeof useSectionStore>['sections'][0
       return
     }
     L.DomEvent.stopPropagation(e)
-    sectionStore.selectSection(section.id)
+    if (workspaceStore.currentTool === ToolType.MOVE_NODE) {
+      sectionStore.startEditingNodes(section.id)
+    } else {
+      sectionStore.selectSection(section.id)
+    }
     soundingStore.selectPoint(null)
     contourStore.selectLine(null)
     renderAllSections()
+  })
+
+  polyline.on('dblclick', (e) => {
+    L.DomEvent.stopPropagation(e)
+    if (workspaceStore.currentTool === ToolType.MOVE_NODE && sectionStore.editingSectionId === section.id) {
+      const mapInst = map.value
+      if (mapInst) {
+        const pt = mapInst.latLngToContainerPoint(e.latlng)
+        const idx = findNearestSegmentIndex(pt, section.points)
+        if (idx >= 0) {
+          const beforeState = snapshotState()
+          sectionStore.addNode(section.id, { lat: e.latlng.lat, lng: e.latlng.lng }, idx)
+          renderAllSections()
+          recordHistory(HistoryActionType.UPDATE_SECTION, `添加断面节点 (${section.name})`)
+          if (beforeState) {
+            historyStore.recordAction(
+              HistoryActionType.UPDATE_SECTION,
+              `添加断面节点 (${section.name})`,
+              beforeState
+            )
+          }
+        }
+      }
+    }
   })
 
   polyline.addTo(group)
@@ -329,11 +366,154 @@ function renderAllSections() {
   sectionPointMarkers.value.clear()
   sectionCrossingMarkers.value.forEach((m) => map.value?.removeLayer(m))
   sectionCrossingMarkers.value.clear()
+  editingSectionNodeMarkers.value.forEach((m) => map.value?.removeLayer(m))
+  editingSectionNodeMarkers.value.clear()
+  abnormalSlopeLayers.value.forEach((l) => map.value?.removeLayer(l))
+  abnormalSlopeLayers.value.clear()
   sectionStore.sections.forEach(renderSection)
+  if (sectionStore.editingSectionId) {
+    renderSectionEditingNodes()
+  }
   if (sectionStore.selectedSectionId) {
     renderSectionAnalysisPoints()
     renderSectionCrossings()
+    renderAbnormalSlopes()
   }
+}
+
+function renderSectionEditingNodes() {
+  if (!map.value || !sectionStore.editingSectionId) return
+  const section = sectionStore.sections.find((s) => s.id === sectionStore.editingSectionId)
+  if (!section) return
+
+  const nodes = section.points
+  nodes.forEach((point, idx) => {
+    let nodeBeforeState: { soundings: any[]; contours: any[]; sections: any[] } | null = null
+
+    const marker = L.marker([point.lat, point.lng], {
+      icon: L.divIcon({
+        className: 'section-edit-node',
+        html: `<div style="
+          background: ${section.color};
+          width: 14px;
+          height: 14px;
+          border-radius: 50%;
+          border: 3px solid white;
+          box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+        "></div>`,
+        iconSize: [14, 14],
+        iconAnchor: [7, 7]
+      }),
+      draggable: true
+    })
+    marker.on('dragstart', () => {
+      nodeBeforeState = snapshotState()
+    })
+    marker.on('drag', () => {
+      const pos = marker.getLatLng()
+      sectionStore.updateNode(section.id, idx, { lat: pos.lat, lng: pos.lng })
+      renderAllSections()
+    })
+    marker.on('dragend', () => {
+      if (nodeBeforeState) {
+        historyStore.recordAction(
+          HistoryActionType.UPDATE_SECTION,
+          `编辑断面节点 (${section.name})`,
+          nodeBeforeState
+        )
+      }
+      nodeBeforeState = null
+    })
+    marker.on('contextmenu', (e) => {
+      L.DomEvent.stopPropagation(e)
+      if (section.points.length > 3) {
+        const beforeState = snapshotState()
+        sectionStore.removeNode(section.id, idx)
+        renderAllSections()
+        historyStore.recordAction(
+          HistoryActionType.UPDATE_SECTION,
+          `删除断面节点 (${section.name})`,
+          beforeState
+        )
+      }
+    })
+    marker.on('click', (e) => {
+      L.DomEvent.stopPropagation(e)
+    })
+    marker.addTo(map.value!)
+    editingSectionNodeMarkers.value.set(`${section.id}-${idx}`, marker)
+  })
+}
+
+function renderAbnormalSlopes() {
+  if (!map.value || !sectionStore.selectedSectionId) return
+  const section = sectionStore.sections.find((s) => s.id === sectionStore.selectedSectionId)
+  if (!section?.analysisResult) return
+
+  const abnormalSegments = sectionStore.getAbnormalSlopeSegments(section.id)
+
+  abnormalSegments.forEach((seg, idx) => {
+    const segPoints = sectionStore.getPointsAlongSegment(
+      section.points,
+      seg.startDistance,
+      seg.endDistance
+    )
+
+    if (segPoints.length < 2) return
+
+    const latlngs = segPoints.map((p) => [p.lat, p.lng] as [number, number])
+
+    const highlight = L.polyline(latlngs, {
+      color: '#f44336',
+      weight: 8,
+      opacity: 0.6,
+      dashArray: '12, 6'
+    })
+
+    highlight.addTo(map.value!)
+    abnormalSlopeLayers.value.set(`abnormal-${idx}`, highlight)
+
+    const midDist = (seg.startDistance + seg.endDistance) / 2
+    const midPoint = sectionStore.getPointsAlongSegment(section.points, midDist, midDist)
+    if (midPoint.length > 0) {
+      const warningMarker = L.marker([midPoint[0].lat, midPoint[0].lng], {
+        icon: L.divIcon({
+          className: 'abnormal-slope-marker',
+          html: `<div style="
+            background: #f44336;
+            color: white;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            font-weight: bold;
+            border: 3px solid white;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+            animation: pulse 1.5s infinite;
+          ">⚠</div>`,
+          iconSize: [24, 24],
+          iconAnchor: [12, 12]
+        }),
+        interactive: true
+      })
+      warningMarker.bindTooltip(
+        `异常坡度: ${(seg.slope * 100).toFixed(1)}% (${seg.slopeAngle.toFixed(1)}°)<br>位置: ${formatDistance(seg.startDistance)} - ${formatDistance(seg.endDistance)}`,
+        { permanent: false, direction: 'top' }
+      )
+      warningMarker.addTo(map.value!)
+      abnormalSlopeLayers.value.set(`abnormal-warning-${idx}`, warningMarker)
+    }
+  })
+}
+
+function formatDistance(meters: number): string {
+  if (meters >= 1000) {
+    return (meters / 1000).toFixed(2) + ' km'
+  }
+  return meters.toFixed(1) + ' m'
 }
 
 function renderSectionAnalysisPoints() {
@@ -488,10 +668,17 @@ function handleDeleteAt(pos: LatLng) {
         sectionStore.analyzeSection(sectionStore.selectedSectionId)
       }
       break
-    case 'section':
+    case 'section': {
+      const beforeState = snapshotState()
       sectionStore.deleteSection(target.id)
       renderAllSections()
+      historyStore.recordAction(
+        HistoryActionType.DELETE_SECTION,
+        `删除${target.label}`,
+        beforeState
+      )
       break
+    }
   }
 }
 
@@ -1006,6 +1193,7 @@ watch(
     }
     if (workspaceStore.currentTool !== ToolType.MOVE_NODE) {
       contourStore.stopEditingNodes()
+      sectionStore.stopEditingNodes()
       renderAllContours()
     }
     renderAllSoundings()
@@ -1066,8 +1254,10 @@ watch(
   () => [
     sectionStore.sections.length,
     sectionStore.selectedSectionId,
+    sectionStore.editingSectionId,
     sectionStore.analysisResult?.soundingPoints.length,
-    sectionStore.analysisResult?.contourCrossings.length
+    sectionStore.analysisResult?.contourCrossings.length,
+    sectionStore.analysisResult?.slopeSegments.length
   ],
   () => {
     nextTick(() => renderAllSections())
@@ -1111,6 +1301,10 @@ onBeforeUnmount(() => {
     <div v-if="contourStore.editingLineId" class="drawing-controls">
       <span class="drawing-tip">节点编辑模式 - 拖动节点移动 / 双击添加 / 右键删除</span>
       <button class="btn-primary" @click="contourStore.stopEditingNodes(); renderAllContours()">完成</button>
+    </div>
+    <div v-if="sectionStore.editingSectionId" class="drawing-controls">
+      <span class="drawing-tip">断面编辑 - 拖动节点移动 / 双击线段添加节点 / 右键删除节点</span>
+      <button class="btn-primary" @click="sectionStore.stopEditingNodes(); renderAllSections()">完成</button>
     </div>
     <div class="basemap-indicator">
       <span class="bi-label">底图:</span>
@@ -1225,7 +1419,9 @@ onBeforeUnmount(() => {
 .section-end-marker,
 .section-label,
 .section-point-marker,
-.section-crossing-marker {
+.section-crossing-marker,
+.section-edit-node,
+.abnormal-slope-marker {
   background: none !important;
   border: none !important;
 }
